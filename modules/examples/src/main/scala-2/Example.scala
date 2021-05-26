@@ -15,7 +15,7 @@ import scala.concurrent.duration._
 
 object Main extends IOApp {
 
-  def runF[F[_]: Sync: Trace: Parallel: Timer]: F[Unit] =
+  def runF[F[_]: Concurrent: Trace: Parallel: Timer]: F[Unit] =
     Trace[F].span("Sort some stuff!") {
       for {
         as <- Sync[F].delay(List.fill(10)(Random.nextInt(5)))
