@@ -5,10 +5,12 @@
 package natchez
 package lightstep
 
-import cats.effect.{ Resource, Sync }
+import cats.effect.{Resource, Sync}
 import cats.syntax.all._
-import io.{ opentracing => ot }
-import io.opentracing.propagation.{ Format, TextMapAdapter }
+import io.opentracing.log.Fields
+import io.{opentracing => ot}
+import io.opentracing.propagation.{Format, TextMapAdapter}
+import io.opentracing.tag.Tags
 
 import scala.jdk.CollectionConverters._
 import java.net.URI
@@ -34,6 +36,15 @@ private[lightstep] final case class LightstepSpan[F[_]: Sync](
       case (k, BooleanValue(v)) => Sync[F].delay(span.setTag(k, v))
     }
 
+  override def log(fields: (String, TraceValue)*): F[Unit] = {
+    val map = fields.map {case (k, v) => k -> v.value }.toMap.asJava
+    Sync[F].delay(span.log(map)).void
+  }
+
+  override def log(event: String): F[Unit] = {
+    Sync[F].delay(span.log(event)).void
+  }
+
   override def span(name: String): Resource[F,Span[F]] =
     Span.putErrorFields(
       Resource
@@ -55,5 +66,22 @@ private[lightstep] final case class LightstepSpan[F[_]: Sync](
 
   // TODO
   def traceUri: F[Option[URI]] = none.pure[F]
+
+  def attachError(err: Throwable): F[Unit] = {
+    put(
+      Tags.ERROR.getKey -> true
+    ) >>
+      Sync[F].delay {
+        span.log(
+          Map(
+            Fields.EVENT -> "error",
+            Fields.ERROR_OBJECT -> err,
+            Fields.ERROR_KIND -> err.getClass.getSimpleName,
+            Fields.MESSAGE -> err.getMessage,
+            Fields.STACK -> err.getStackTrace.mkString
+          ).asJava
+        )
+      }.void
+  }
 
 }

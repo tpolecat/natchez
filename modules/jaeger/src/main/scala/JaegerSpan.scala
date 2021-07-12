@@ -5,13 +5,15 @@
 package natchez
 package jaeger
 
-import io.{ opentracing => ot }
+import io.{opentracing => ot}
 import cats.data.Nested
 import cats.effect.Sync
 import cats.effect.Resource
 import cats.syntax.all._
+import io.opentracing.log.Fields
 import io.opentracing.propagation.Format
 import io.opentracing.propagation.TextMapAdapter
+import io.opentracing.tag.Tags
 
 import scala.jdk.CollectionConverters._
 import java.net.URI
@@ -41,6 +43,15 @@ private[jaeger] final case class JaegerSpan[F[_]: Sync](
       case (k, BooleanValue(v)) => Sync[F].delay(span.setTag(k, v))
     }
 
+  override def log(fields: (String, TraceValue)*): F[Unit] = {
+    val map = fields.map {case (k, v) => k -> v.value }.toMap.asJava
+    Sync[F].delay(span.log(map)).void
+  }
+
+  override def log(event: String): F[Unit] = {
+    Sync[F].delay(span.log(event)).void
+  }
+
   def span(name: String): Resource[F,Span[F]] =
     Span.putErrorFields(
       Resource.make(
@@ -67,4 +78,20 @@ private[jaeger] final case class JaegerSpan[F[_]: Sync](
       uri.resolve(s"/trace/$id")
     } .value
 
+  def attachError(err: Throwable): F[Unit] = {
+    put(
+      Tags.ERROR.getKey -> true
+    ) >>
+    Sync[F].delay {
+      span.log(
+        Map(
+          Fields.EVENT -> "error",
+          Fields.ERROR_OBJECT -> err,
+          Fields.ERROR_KIND -> err.getClass.getSimpleName,
+          Fields.MESSAGE -> err.getMessage,
+          Fields.STACK -> err.getStackTrace.mkString
+        ).asJava
+      )
+    }.void
+  }
 }
